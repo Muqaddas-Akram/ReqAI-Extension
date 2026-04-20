@@ -1,0 +1,1091 @@
+{
+  "name": "ReqAI Workflow",
+  "nodes": [
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "={\"status\": \"received\", \"message\": \"Processing started\"}",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          }
+        }
+      },
+      "id": "38850463-c647-4c86-9620-d54334a4c772",
+      "name": "Respond to Extension",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        -32,
+        -32
+      ]
+    },
+    {
+      "parameters": {
+        "collection": "projects",
+        "options": {
+          "limit": 1
+        },
+        "query": "={{ $json.query }}"
+      },
+      "id": "793de352-370d-493e-ad50-15371cc1167f",
+      "name": "MongoDB — Find Existing Project",
+      "type": "n8n-nodes-base.mongoDb",
+      "typeVersion": 1,
+      "position": [
+        176,
+        176
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "mongoDb": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "MongoDB account"
+        }
+      },
+      "notes": "Check karo — kya ye client/project pehle se hai MongoDB mein?"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "project-exists-check",
+              "leftValue": "={{$json._id.toString()}}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "5255074d-535f-450d-9f3a-4fbf5cd1188a",
+      "name": "Project Exists?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        400,
+        176
+      ],
+      "notes": "TRUE = existing project (update karo) | FALSE = new project (create karo)"
+    },
+    {
+      "parameters": {
+        "jsCode": "// NEW PROJECT — set initial data\nconst webhook = $('Webhook — Receive Audio').item.json;\nreturn [{\n  json: {\n    isNewProject: true,\n    projectId: null,\n    client_name: webhook.body?.client_name || webhook.client_name || 'Client',\n    project_name: webhook.body?.project_name || webhook.project_name || 'New Project',\n    pm_name: webhook.body?.pm_name || webhook.pm_name || '',\n    pm_email: webhook.body?.pm_email || webhook.pm_email || '',\n    meeting_number: 1,\n    previous_requirements: [],\n    previous_srd_link: null,\n    srs_file_id: null,\n    all_meetings: [],\n    version: \"1.0\",\n    change_log: [{\n      version: \"1.0\",\n      date: new Date().toISOString(),\n      summary: \"Initial SRS created\"\n    }]\n  }\n}];"
+      },
+      "id": "63b7b497-e35b-4588-8550-d08ada1e193e",
+      "name": "Set New Project Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        624,
+        352
+      ],
+      "notes": "Naya project — koi history nahi"
+    },
+    {
+      "parameters": {
+        "jsCode": "const existing = $('MongoDB — Find Existing Project').item.json;\nconst webhook = $('Webhook — Receive Audio').item.json;\n\nconst meetingNumber = (existing.meeting_count || 1) + 1;\nconst newVersion = `1.${meetingNumber - 1}`;\n\nreturn [{\n  json: {\n    isNewProject: false,\n    projectId: existing._id,\n    client_name: existing.client_name,\n    project_name: existing.project_name,\n    pm_name: existing.pm_name || webhook.body?.pm_name || '',\n    pm_email: existing.pm_email || webhook.body?.pm_email || '',\n    audio_url: webhook.body?.audio_url || webhook.audio_url || '',\n    meeting_number: meetingNumber,\n    previous_requirements: existing.requirements || [],\n    previous_srd_link: existing.srd_link || null,\n    srs_file_id: existing.srs_file_id || null,\n    all_meetings: existing.meetings || [],\n    version: newVersion,\n    change_log: existing.change_log || []\n  }\n}];"
+      },
+      "id": "61f6fa01-e020-4230-942e-2deb52a683f3",
+      "name": "Load Existing Project Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        624,
+        0
+      ],
+      "notes": "Purana project — history load karo"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Merge both paths into one\nconst data = $input.first().json;\n\nreturn [{\n  json: {\n    ...data\n  }\n}];"
+      },
+      "id": "18c05e1b-7512-470c-97b5-cdbab11bd426",
+      "name": "Merge Paths",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        848,
+        176
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.assemblyai.com/v2/transcript",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"audio_url\": \"{{ $('AssemblyAI — Upload File').item.json.upload_url }}\",\n  \"speech_models\": [\"universal-2\"],\n  \"language_detection\": true,\n  \"speaker_labels\": true,\n  \"speakers_expected\": 2,\n  \"punctuate\": true,\n  \"format_text\": true\n}",
+        "options": {}
+      },
+      "id": "739a7add-d84d-4d39-adec-02f3ed0efc59",
+      "name": "AssemblyAI — Submit Audio",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        1280,
+        176
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "Header Auth account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "amount": 15,
+        "unit": "seconds"
+      },
+      "id": "a19d0ac3-6686-4253-835b-64936257f4f9",
+      "name": "Wait 15 Seconds",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1,
+      "position": [
+        1504,
+        176
+      ],
+      "webhookId": "39169520-93a6-4294-80a3-c2984191ec22"
+    },
+    {
+      "parameters": {
+        "url": "=https://api.assemblyai.com/v2/transcript/{{$('AssemblyAI — Submit Audio').item.json.id}}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "id": "3179bc60-7acc-406f-a9e8-8b6a626a69bb",
+      "name": "AssemblyAI — Check Status",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        1728,
+        176
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "Header Auth account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "927acc49-affd-4df6-b9ba-b49ac582e2cf",
+              "leftValue": "={{ $json.status }}",
+              "rightValue": "completed",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "a401a797-6827-4c1d-96bf-872339af10ac",
+      "name": "Transcription Done?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1952,
+        176
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $input.first().json;\nconst projectData = $('Merge Paths').item.json;\nconst webhookData = $('Webhook — Receive Audio').item.json;\nconst mergedData = $('Merge Audio + Project').first().json;\n\nconst pmName = mergedData.pm_name || webhookData.body?.pm_name || webhookData.pm_name || 'PM';\nconst clientName = mergedData.client_name || projectData.client_name || 'Client';\n\nconst utterances = data.utterances || [];\nlet transcript = '';\nfor (const utt of utterances) {\n  const speaker = utt.speaker === 'A' ? clientName : pmName;\n  const mins = String(Math.floor(utt.start / 60000)).padStart(2, '0');\n  const secs = String(Math.floor((utt.start % 60000) / 1000)).padStart(2, '0');\n  transcript += `[${mins}:${secs}] ${speaker}:\\n\"${utt.text}\"\\n\\n`;\n}\n\nconst now = new Date();\nconst meetingDate = now.toLocaleDateString('en-PK', {\n  year: 'numeric', month: 'long', day: 'numeric'\n});\n\nreturn [{\n  json: {\n    transcript: transcript.trim(),\n    meetingDate,\n    meetingId: 'MTG-' + Date.now(),\n    duration: data.audio_duration || 0,\n    isNewProject: projectData.isNewProject,\n    projectId: projectData.projectId,\n    client_name: clientName,\n    project_name: projectData.project_name,\n    pm_email: projectData.pm_email,\n    pm_name: pmName,\n    meeting_number: projectData.meeting_number,\n    previous_requirements: projectData.previous_requirements,\n    previous_srd_link: projectData.previous_srd_link,\n    all_meetings: projectData.all_meetings\n  }\n}];"
+      },
+      "id": "ce9fa84f-6942-4b7d-a1c1-873a536a00a6",
+      "name": "Format Transcript",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2160,
+        176
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const response = $input.first().json;\nconst rawText = response.choices[0].message.content;\nconst transcriptData = $('Format Transcript').item.json;\n\nlet cleaned = rawText.replace(/```json/gi, '').replace(/```/g, '').trim();\nconst start = cleaned.indexOf('{');\nconst end = cleaned.lastIndexOf('}');\nif (start !== -1 && end !== -1) cleaned = cleaned.substring(start, end + 1);\n\ntry {\n  const req = JSON.parse(cleaned);\n  const funcReqs = req.functional_requirements || [];\n  const nfuncReqs = req.non_functional_requirements || [];\n  const conflicts = req.conflicts || [];\n  const changes = req.changes_summary || {};\n\n  return [{\n    json: {\n      ...req,\n\n      // ✅ FIX — Webhook data always wins over GROK's extracted values\n      project: transcriptData.project_name || req.project,\n      client: transcriptData.client_name || req.client,\n\n      // Meeting metadata\n      meetingId: transcriptData.meetingId,\n      meetingDate: transcriptData.meetingDate,\n      meetingNumber: transcriptData.meeting_number,\n      pmEmail: transcriptData.pm_email,\n      transcript: transcriptData.transcript,\n      duration: transcriptData.duration,\n      isNewProject: transcriptData.isNewProject,\n      projectId: transcriptData.projectId,\n      allMeetings: transcriptData.all_meetings,\n\n      // ✅ These also from webhook — consistent naming for MongoDB\n      project_name: transcriptData.project_name,\n      client_name: transcriptData.client_name,\n\n      // Stats\n      funcCount: funcReqs.length,\n      nfuncCount: nfuncReqs.length,\n      conflictsCount: conflicts.length,\n      newReqCount: changes.new_count || 0,\n      updatedReqCount: changes.updated_count || 0,\n      removedReqCount: changes.removed_count || 0\n    }\n  }];\n} catch(e) {\n  return [{ json: { error: 'Parse failed', raw: rawText, ...transcriptData } }];\n}"
+      },
+      "id": "9d31b63e-c2f5-4878-83a3-7ede1ac27dcc",
+      "name": "Parse Requirements JSON",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2816,
+        176
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const d = $input.first().json;\nconst funcReqs = d.functional_requirements || [];\nconst nfuncReqs = d.non_functional_requirements || [];\nconst techConstraints = d.technical_constraints || [];\nconst uiReqs = d.ui_ux_requirements || [];\nconst techStack = d.tech_stack || [];\nconst conflicts = d.conflicts || [];\nconst changeLog = d.change_log || [];\nconst changesSummary = d.changes_summary || {};\n\nconst meetingNum = d.meetingNumber || d.meeting_number || 1;\nconst version = `1.${meetingNum - 1}`;\n\nconst priorityColor = (p) => {\n  if (!p) return '#888';\n  if (p.toLowerCase() === 'high') return '#C00000';\n  if (p.toLowerCase() === 'medium') return '#ED7D31';\n  return '#00B050';\n};\n\nconst newReqs = funcReqs.filter(r => r.status === 'new').length;\nconst updatedReqs = funcReqs.filter(r => r.status === 'updated').length;\nconst unchangedReqs = funcReqs.filter(r => r.status === 'unchanged').length;\n\nconst changeLogRows = changeLog.map(entry => `\n  <tr>\n    <td>${entry.version || ''}</td>\n    <td>${entry.date ? new Date(entry.date).toLocaleDateString() : 'N/A'}</td>\n    <td>${entry.summary || ''}</td>\n  </tr>`).join('');\n\nconst changesSummarySection = !d.isNewProject ? `\n<div style=\"background:#FFF8E1;border:1px solid #FFD54F;border-radius:8px;padding:16px 24px;margin:16px 0\">\n  <h3 style=\"margin:0 0 10px;color:#E65100\">📋 Changes in v${version}</h3>\n  <div style=\"display:flex;gap:16px;margin-bottom:10px\">\n    <span style=\"background:#E8F5E9;color:#2E7D32;padding:4px 12px;border-radius:12px;font-size:13px;font-weight:bold\">🆕 New: ${changesSummary.new_count || newReqs}</span>\n    <span style=\"background:#FFF3E0;color:#E65100;padding:4px 12px;border-radius:12px;font-size:13px;font-weight:bold\">✏️ Updated: ${changesSummary.updated_count || updatedReqs}</span>\n    <span style=\"background:#F3F3F3;color:#555;padding:4px 12px;border-radius:12px;font-size:13px;font-weight:bold\">✅ Unchanged: ${changesSummary.unchanged_count || unchangedReqs}</span>\n  </div>\n  ${changesSummary.summary_text ? `<p style=\"margin:0;font-size:13px;color:#555;font-style:italic\">${changesSummary.summary_text}</p>` : ''}\n</div>` : '';\n\nlet doc = `<!DOCTYPE html>\n<html>\n<head>\n<meta charset=\"UTF-8\">\n<style>\n  body{font-family:Arial,sans-serif;max-width:900px;margin:0 auto;padding:40px;color:#2E2E2E}\n  .header{background:#1F4E79;color:white;padding:30px 40px;border-radius:8px 8px 0 0}\n  .header h1{margin:0;font-size:26px}\n  .header p{margin:6px 0 0;color:#B0C4D8;font-size:13px}\n  .info-box{background:#f0f4f8;border:1px solid #ddd;padding:20px 40px;margin-bottom:16px}\n  .info-box table{width:100%;border-collapse:collapse}\n  .info-box td{padding:6px 12px;border:none;font-size:14px}\n  .info-box td:first-child{font-weight:bold;color:#1F4E79;width:160px}\n  .stats{display:flex;gap:16px;margin:16px 0}\n  .stat{flex:1;background:white;border:1px solid #ddd;border-radius:8px;padding:16px;text-align:center}\n  .stat-num{font-size:36px;font-weight:bold}\n  .stat-label{font-size:12px;color:#666;margin-top:4px}\n  h2{color:#1F4E79;border-bottom:3px solid #1F4E79;padding-bottom:8px;margin-top:40px;font-size:18px}\n  h3{color:#2E75B6;margin-top:20px;font-size:15px}\n  .summary{background:#EBF3FB;border-left:4px solid #2E75B6;padding:14px 20px;border-radius:0 8px 8px 0;font-style:italic;font-size:14px;margin:12px 0}\n  .req-card{border:1px solid #ddd;border-radius:8px;margin:16px 0;overflow:hidden}\n  .req-header{padding:12px 20px;font-weight:bold;font-size:14px;color:white;background:#2E75B6}\n  .req-header.updated{background:#E65100}\n  .req-header.unchanged{background:#888}\n  .req-table{width:100%;border-collapse:collapse}\n  .req-table td{padding:9px 16px;border-bottom:1px solid #eee;font-size:13px;vertical-align:top}\n  .req-table td:first-child{font-weight:bold;color:#1F4E79;background:#f8f9fa;width:180px}\n  .req-table tr:last-child td{border-bottom:none}\n  .badge{display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:bold;margin-left:8px}\n  .badge-new{background:#E8F5E9;color:#2E7D32}\n  .badge-updated{background:#FFF3E0;color:#E65100}\n  .badge-unchanged{background:#F3F3F3;color:#555}\n  .changelog-table{width:100%;border-collapse:collapse;margin-top:12px}\n  .changelog-table th{background:#1F4E79;color:white;padding:10px 16px;text-align:left;font-size:13px}\n  .changelog-table td{padding:9px 16px;border-bottom:1px solid #eee;font-size:13px}\n  .changelog-table tr:nth-child(even){background:#f8f9fa}\n  ul{margin:4px 0;padding-left:18px}\n  ul li{padding:3px 0;font-size:13px}\n  .tech-table{width:100%;border-collapse:collapse;margin-top:12px}\n  .tech-table th{background:#1F4E79;color:white;padding:10px 16px;text-align:left;font-size:13px}\n  .tech-table td{padding:9px 16px;border-bottom:1px solid #eee;font-size:13px}\n  .tech-table tr:nth-child(even){background:#f8f9fa}\n  .conflict{border:1px solid #fcc;border-radius:8px;padding:14px 20px;margin:12px 0;background:#fff5f5}\n  .footer{text-align:center;color:#aaa;font-size:11px;margin-top:50px;border-top:2px solid #1F4E79;padding-top:16px}\n</style>\n</head>\n<body>\n\n<div class=\"header\">\n  <h1>Software Requirements Specification</h1>\n  <p>${d.project || 'Project'} &nbsp;|&nbsp; v${version} &nbsp;|&nbsp; ReqAI Agent v1</p>\n</div>\n\n<div class=\"info-box\">\n  <table>\n    <tr>\n      <td>Project</td><td>${d.project || 'N/A'}</td>\n      <td style=\"font-weight:bold;color:#1F4E79;width:160px\">Meeting No.</td><td>#${d.meetingNumber || d.meeting_number || 1}</td>\n    </tr>\n    <tr>\n      <td>Client</td><td>${d.client || d.client_name || 'N/A'}</td>\n      <td style=\"font-weight:bold;color:#1F4E79\">Date</td><td>${d.meetingDate || 'N/A'}</td>\n    </tr>\n    <tr>\n      <td>Timeline</td><td>${d.timeline || 'TBD'}</td>\n      <td style=\"font-weight:bold;color:#1F4E79\">Budget</td><td>${d.budget || 'TBD'}</td>\n    </tr>\n    <tr>\n      <td>Version</td><td><strong style=\"color:#1F4E79\">v${version}</strong></td>\n      <td style=\"font-weight:bold;color:#1F4E79\">Document Type</td><td>${d.isNewProject ? '🆕 Initial SRS' : '✏️ Updated SRS'}</td>\n    </tr>\n  </table>\n</div>\n\n<div class=\"stats\">\n  <div class=\"stat\"><div class=\"stat-num\" style=\"color:#1F4E79\">${funcReqs.length}</div><div class=\"stat-label\">Functional Requirements</div></div>\n  <div class=\"stat\"><div class=\"stat-num\" style=\"color:#00B050\">${nfuncReqs.length}</div><div class=\"stat-label\">Non-Functional Requirements</div></div>\n  <div class=\"stat\"><div class=\"stat-num\" style=\"color:#2E75B6\">${version}</div><div class=\"stat-label\">Version</div></div>\n  <div class=\"stat\"><div class=\"stat-num\" style=\"color:${conflicts.length > 0 ? '#C00000' : '#00B050'}\">${conflicts.length}</div><div class=\"stat-label\">Conflicts Detected</div></div>\n</div>\n\n${changesSummarySection}\n\n<h2>Executive Summary</h2>\n<div class=\"summary\">${d.meeting_summary || 'No summary available.'}</div>\n\n<h2>1. Functional Requirements</h2>`;\n\nif (funcReqs.length === 0) {\n  doc += `<p style=\"color:#888;font-style:italic\">No functional requirements extracted.</p>`;\n} else {\n  for (const r of funcReqs) {\n    const status = r.status || 'new';\n    const badge = status === 'updated'\n      ? '<span class=\"badge badge-updated\">UPDATED</span>'\n      : status === 'unchanged'\n      ? '<span class=\"badge badge-unchanged\">UNCHANGED</span>'\n      : '<span class=\"badge badge-new\">NEW</span>';\n    const headerClass = status === 'updated' ? 'req-header updated' : status === 'unchanged' ? 'req-header unchanged' : 'req-header';\n    const acList = (r.acceptance_criteria || []).map(ac => `<li>${ac}</li>`).join('');\n    doc += `\n<div class=\"req-card\">\n  <div class=\"${headerClass}\">${r.id} — ${r.title} ${badge}</div>\n  <table class=\"req-table\">\n    <tr><td>Description</td><td>${r.description}</td></tr>\n    <tr><td>Priority</td><td><strong style=\"color:${priorityColor(r.priority)}\">${r.priority || 'Medium'}</strong></td></tr>\n    <tr><td>Complexity</td><td>${r.complexity || 'Medium'}</td></tr>\n    <tr><td>Module</td><td>${r.module || 'General'}</td></tr>\n    <tr><td>User Story</td><td><em>${r.user_story || 'N/A'}</em></td></tr>\n    <tr><td>Acceptance Criteria</td><td><ul>${acList}</ul></td></tr>\n  </table>\n</div>`;\n  }\n}\n\ndoc += `<h2>2. Non-Functional Requirements</h2>`;\n\nif (nfuncReqs.length === 0) {\n  doc += `<p style=\"color:#888;font-style:italic\">No non-functional requirements extracted.</p>`;\n} else {\n  for (const r of nfuncReqs) {\n    doc += `\n<div class=\"req-card\">\n  <div class=\"req-header\">${r.id} — ${r.title}</div>\n  <table class=\"req-table\">\n    <tr><td>Description</td><td>${r.description}</td></tr>\n    <tr><td>Target</td><td>${r.target || 'TBD'}</td></tr>\n    <tr><td>Priority</td><td><strong style=\"color:${priorityColor(r.priority)}\">${r.priority || 'Medium'}</strong></td></tr>\n  </table>\n</div>`;\n  }\n}\n\nif (techStack.length > 0) {\n  doc += `<h2>3. Recommended Tech Stack</h2>\n<table class=\"tech-table\">\n  <tr><th>Layer</th><th>Technology</th><th>Reason</th></tr>`;\n  for (const t of techStack) {\n    doc += `<tr><td>${t.layer||''}</td><td><strong>${t.technology||''}</strong></td><td>${t.reason||''}</td></tr>`;\n  }\n  doc += `</table>`;\n}\n\nif (techConstraints.length > 0) {\n  doc += `<h2>4. Technical Constraints</h2>`;\n  for (const t of techConstraints) {\n    doc += `<p><strong>${t.constraint}:</strong> ${t.detail}</p>`;\n  }\n}\n\nif (uiReqs.length > 0) {\n  doc += `<h2>5. UI/UX Requirements</h2>`;\n  for (const ui of uiReqs) {\n    const comps = (ui.components || []).map(c => `<li>${c}</li>`).join('');\n    doc += `<h3>Screen: ${ui.screen}</h3><ul>${comps}</ul>`;\n    if (ui.notes) doc += `<p style=\"color:#666;font-size:13px\"><em>Notes: ${ui.notes}</em></p>`;\n  }\n}\n\nif (conflicts.length > 0) {\n  doc += `<h2 style=\"color:#C00000\">⚠ Conflicts — Requires Review</h2>`;\n  for (const c of conflicts) {\n    doc += `<div class=\"conflict\"><strong style=\"color:#C00000\">[${c.severity}]</strong> ${c.req1} vs ${c.req2}<br><span style=\"font-size:13px;color:#666\">${c.description}</span></div>`;\n  }\n}\n\nif (changeLog.length > 0) {\n  doc += `<h2>6. Version History</h2>\n<table class=\"changelog-table\">\n  <tr><th>Version</th><th>Date</th><th>Changes</th></tr>\n  ${changeLogRows}\n</table>`;\n}\n\ndoc += `\n<div class=\"footer\">\n  Generated automatically by ReqAI Agent v1 &nbsp;|&nbsp; ${d.meetingDate || ''} &nbsp;|&nbsp; v${version} &nbsp;|&nbsp; All documents saved to project history\n</div>\n</body></html>`;\n\nreturn [{ json: { srsDocument: doc, ...d, version: version } }];"
+      },
+      "id": "be767b96-93cd-4a3a-811c-0de8f8bff3ba",
+      "name": "Build SRS Document",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3056,
+        352
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const reqData = $('Parse Requirements JSON').item.json;\nconst meetingFile = $('HTTP Request0').item.json;\nconst srsFile = $('HTTP Request1').item.json;\nconst webhookData = $('Webhook — Receive Audio').item.json;\nconst srsLink = `https://drive.google.com/file/d/${srsFile.id}/view`;\nconst meetingLink = `https://drive.google.com/file/d/${meetingFile.id}/view`;\nconst now = new Date();\nconst meetingDate = reqData.meetingDate || now.toLocaleDateString('en-PK', {\n  year: 'numeric', month: 'long', day: 'numeric'\n});\nconst meetingTime = now.toLocaleTimeString('en-PK', {\n  hour: '2-digit', minute: '2-digit', hour12: true\n});\nconst audioUrl = $('Merge Audio + Project').first().json.upload_url || '';\nconst pmName = $('Merge Audio + Project').first().json.pm_name || \n               webhookData.body?.pm_name || \n               webhookData.pm_name || \n               reqData.pm_name || '';\n\n// Version — From Merge Paths \nconst meetingNum = reqData.meetingNumber || 1;\nconst version = `1.${meetingNum - 1}`;\n\nconst existingChangeLog = reqData.change_log || [];\nconst changesSummary = reqData.changes_summary || {};\n\n// Naya change log entry add karo\nconst newLogEntry = {\n  version: version,\n  date: now.toISOString(),\n  summary: reqData.isNewProject\n    ? 'Initial SRS created'\n    : (changesSummary.summary_text || `Meeting #${reqData.meetingNumber} — ${changesSummary.new_count || 0} new, ${changesSummary.updated_count || 0} updated requirements`)\n};\n\n// Agar same version pehle se hai to duplicate mat karo\nconst alreadyExists = existingChangeLog.some(e => e.version === version);\nconst updatedChangeLog = alreadyExists\n  ? existingChangeLog\n  : [...existingChangeLog, newLogEntry];\n\nconst currentMeeting = {\n  meeting_number: reqData.meetingNumber,\n  meeting_id: reqData.meetingId,\n  meeting_date: meetingDate,\n  meeting_time: meetingTime,\n  audio_url: audioUrl,\n  srs_link: srsLink,\n  meeting_record_link: meetingLink,\n  requirements_count: reqData.funcCount || 0,\n  version: version,\n  changes_summary: changesSummary.summary_text || ''\n};\n\nconst allMeetings = [...(reqData.allMeetings || []), currentMeeting];\n\nreturn [{\n  json: {\n    // For routing\n    isNewProject: reqData.isNewProject,\n    projectId: reqData.projectId,\n    // MongoDB fields\n    project_name: reqData.project_name,\n    client_name: reqData.client_name,\n    pm_name: pmName,\n    pm_email: reqData.pmEmail || reqData.pm_email || '',\n    audio_url: audioUrl,\n    meeting_count: reqData.meetingNumber,\n    requirements: reqData.functional_requirements || [],\n    srd_link: srsLink,\n    meeting_record_link: meetingLink,\n    srs_file_id: srsFile.id,\n    meetings: allMeetings,\n    last_updated: now.toISOString(),\n    // Version control\n    version: version,\n    change_log: updatedChangeLog,\n    changes_summary: changesSummary,\n    // for email\n    emailData: {\n      pmName: pmName,\n      pmEmail: reqData.pmEmail || reqData.pm_email || '',\n      projectName: reqData.project_name,\n      clientName: reqData.client_name,\n      meetingDate: meetingDate,\n      meetingNumber: reqData.meetingNumber || 1,\n      srsLink,\n      meetingLink,\n      funcCount: reqData.funcCount || 0,\n      nfuncCount: reqData.nfuncCount || 0,\n      conflictsCount: reqData.conflictsCount || 0,\n      isNewProject: reqData.isNewProject,\n      version: version,\n      changesSummary: changesSummary.summary_text || ''\n    }\n  }\n}];"
+      },
+      "id": "d9699152-c748-4335-a17e-1833deef6e92",
+      "name": "Prepare MongoDB Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4032,
+        176
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "is-new-project",
+              "leftValue": "={{$json.isNewProject}}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "404f8c53-816d-4905-99a0-83a3d7095e28",
+      "name": "New or Existing?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        4256,
+        176
+      ],
+      "notes": "TRUE = insert new | FALSE = update existing"
+    },
+    {
+      "parameters": {
+        "operation": "insert",
+        "collection": "projects",
+        "fields": "project_name,client_name,pm_name,pm_email,audio_url,meeting_count,last_updated",
+        "options": {}
+      },
+      "id": "faa911b1-2d1c-49fb-8b59-3a1db7bef247",
+      "name": "MongoDB — Insert New Project",
+      "type": "n8n-nodes-base.mongoDb",
+      "typeVersion": 1,
+      "position": [
+        4976,
+        64
+      ],
+      "credentials": {
+        "mongoDb": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "MongoDB account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "collection": "projects",
+        "updateKey": "project_name",
+        "fields": "project_name,client_name,pm_name,pm_email,audio_url,meeting_count,last_updated",
+        "options": {}
+      },
+      "id": "f28faed3-80d4-4ac4-b7ab-9ee26d7e2594",
+      "name": "MongoDB — Update Existing Project",
+      "type": "n8n-nodes-base.mongoDb",
+      "typeVersion": 1,
+      "position": [
+        4976,
+        272
+      ],
+      "credentials": {
+        "mongoDb": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "MongoDB account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $('Prepare MongoDB Data').item.json.emailData.pmEmail }}",
+        "subject": "={{ $('Prepare MongoDB Data').item.json.emailData.projectName }} (v{{ $('Prepare MongoDB Data').item.json.emailData.version }})",
+        "message": "=<html><body style=\"font-family:Arial,sans-serif;max-width:500px;margin:0 auto;padding:20px\">\n<div style=\"background:#1F4E79;padding:20px;border-radius:8px 8px 0 0\">\n  <h2 style=\"color:white;margin:0\">Project — {{ $('Prepare MongoDB Data').item.json.emailData.projectName }} (v{{ $('Prepare MongoDB Data').item.json.emailData.version }})</h2>\n</div>\n<div style=\"background:#f8f9fa;padding:20px;border:1px solid #ddd;border-top:none;border-radius:0 0 8px 8px\">\n  <p style=\"margin:0 0 8px\"><strong>Project:</strong> {{ $('Prepare MongoDB Data').item.json.emailData.projectName }}</p>\n  <p style=\"margin:0 0 8px\"><strong>Client:</strong> {{ $('Prepare MongoDB Data').item.json.emailData.clientName }}</p>\n  <p style=\"margin:0 0 8px\"><strong>Meeting #:</strong> {{ $('Prepare MongoDB Data').item.json.emailData.meetingNumber }}</p>\n  <p style=\"margin:0 0 20px\"><strong>Date:</strong> {{ $('Prepare MongoDB Data').item.json.emailData.meetingDate }}</p>\n  {{ $('Prepare MongoDB Data').item.json.emailData.isNewProject ? '' : '<div style=\"background:#FFF8E1;border:1px solid #FFD54F;border-radius:8px;padding:14px;margin-bottom:20px\"><p style=\"margin:0 0 6px;font-weight:bold;color:#E65100\">Changes in v' + $('Prepare MongoDB Data').item.json.emailData.version + '</p><p style=\"margin:0;font-size:13px;color:#555\">' + ($('Prepare MongoDB Data').item.json.emailData.changesSummary || 'Requirements updated') + '</p></div>' }}\n  <a href=\"{{ $('Prepare MongoDB Data').item.json.emailData.srsLink }}\" style=\"background:#1F4E79;color:white;padding:12px 24px;border-radius:6px;text-decoration:none;font-weight:bold;margin-right:10px;display:inline-block\">Open SRS Document</a>\n  <a href=\"{{ $('Prepare MongoDB Data').item.json.emailData.meetingLink }}\" style=\"background:#0F6E56;color:white;padding:12px 24px;border-radius:6px;text-decoration:none;font-weight:bold;display:inline-block\">Open Meeting Record</a>\n  <p style=\"margin:20px 0 0;font-size:11px;color:#aaa;border-top:1px solid #eee;padding-top:12px\">Generated by ReqAI Agent v1 &nbsp;|&nbsp;{{ $('Prepare MongoDB Data').item.json.emailData.meetingDate }}</p>\n</div>\n</body></html>",
+        "options": {}
+      },
+      "id": "21e38fdc-6aa3-4824-a7f2-053704cbd862",
+      "name": "Gmail — Send to PM",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "position": [
+        5264,
+        176
+      ],
+      "webhookId": "9367423f-cf61-416f-921d-c209a7be306a",
+      "executeOnce": false,
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.groq.com/openai/v1/chat/completions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.groqBody }}",
+        "options": {}
+      },
+      "id": "90a2797e-f43b-4659-88d1-9f53648aa3e0",
+      "name": "GROK — Extract & Compare Requirements",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        2592,
+        176
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "Header Auth account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.groq.com/openai/v1/chat/completions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ \n  model: \"llama-3.3-70b-versatile\", \n  max_completion_tokens: 4000,\n  messages: [\n    { \n      role: \"system\", \n      content: `You are a professional meeting recorder. Output ONLY complete, valid HTML. Never cut off mid-tag. Always close every HTML tag properly.\n\nSPEAKER NAMES:\n- PM → ${$('Format Transcript').item.json.pm_name || 'PM'}\n- CLIENT → ${$('Format Transcript').item.json.client_name || 'Client'}\n\nDATE: ${$('Format Transcript').item.json.meetingDate}\n\nOUTPUT THIS EXACT HTML STRUCTURE IN ORDER:\n\n[1] HEADER div — background:#1F4E79; color:white; padding:28px 36px; border-radius:10px 10px 0 0\n  - h1: meeting title (font-size:22px)\n  - p: Date · Client: [name] · PM: [name] (color:rgba(255,255,255,0.75); font-size:13px)\n\n[2] AGENDA BAR div — background:#EBF3FB; border:1px solid #B5D4F4; padding:12px 36px\n  - Show only topics actually discussed as: 1. Topic · 2. Topic · etc\n  - font-size:12px; color:#185FA5\n\n[3] TOPIC SECTIONS — one per discussed topic only, skip if not discussed\n  Each section:\n  - Topic badge: background:#1F4E79; color:white; border-radius:20px; padding:3px 14px; font-size:11px; font-weight:600\n  - Horizontal line after badge\n  - Dialogue bubbles:\n    PM bubble: background:#F0FAF5; border:1px solid #A8D5B9; border-radius:0 8px 8px 8px; padding:10px 14px\n    PM label: background:#0F6E56; color:white; font-size:11px; padding:2px 10px; border-radius:4px\n    CLIENT bubble: background:#EBF3FB; border:1px solid #B5D4F4; border-radius:0 8px 8px 8px; padding:10px 14px\n    CLIENT label: background:#185FA5; color:white; font-size:11px; padding:2px 10px; border-radius:4px\n\n[4] MEETING SUMMARY div — background:#F8F9FA; border:1px solid #ddd; border-radius:8px; padding:20px 24px; margin:20px 36px\n  - Label: \"MEETING SUMMARY\" font-size:13px; font-weight:600; color:#1F4E79; margin-bottom:10px\n  - Summary paragraph: font-size:13px; line-height:1.7; color:#2c3e50\n\n[5] NEXT STEPS div — background:#FFF3E0; border:1px solid #FAC775; border-radius:8px; padding:16px 24px; margin:0 36px 20px\n  - Label: \"NEXT STEPS\" font-size:13px; font-weight:600; color:#633806; margin-bottom:10px\n  - Each step: → arrow + text, font-size:13px; color:#2c3e50; margin-bottom:6px\n\n[6] SUMMARY TABLE — margin:0 36px 36px; width:calc(100% - 72px)\n  - Columns: Topic | Key Points | Decisions Made | Action Owner\n  - table style: border-collapse:collapse; width:100%\n  - th style: background:#1F4E79; color:white; padding:12px 16px; text-align:left; font-size:12px\n  - td style: border:1px solid #ddd; padding:10px 14px; font-size:13px; vertical-align:top\n  - Even rows: background:#f8f9fa\n  - One row per topic discussed\n  - Key Points: use <br> between points\n  - Decisions Made: actual decision or \"To be discussed\"\n  - Action Owner: actual person name\n\nIMPORTANT RULES:\n- Return ONLY HTML, zero markdown, zero backticks\n- Close EVERY tag properly — </div> </table> </tr> </td> </body> </html>\n- Do NOT stop mid-tag or mid-table\n- Wrap everything in: <div style=\"font-family:Arial,sans-serif;max-width:900px;margin:0 auto;border:1px solid #ddd;border-radius:10px;overflow:hidden\">`\n    }, \n    { \n      role: \"user\", \n      content: $('Format Transcript').item.json.transcript \n    }\n  ] \n}) }}",
+        "options": {}
+      },
+      "id": "ff7bfa68-e6b1-494c-8c25-cd2a355a1010",
+      "name": "GROK — Generate Meeting Record",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        3056,
+        -16
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "Header Auth account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.assemblyai.com/v2/upload",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "contentType": "binaryData",
+        "inputDataFieldName": "audio_file0",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1072,
+        176
+      ],
+      "id": "8090869e-2e03-405d-b814-c60989df7332",
+      "name": "AssemblyAI — Upload File",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "Header Auth account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const d = $input.first().json;\n\nconst systemPrompt = `You are a senior software business analyst. Create a professional SRS document.\nThe transcript may be in any language (Urdu, Hindi, Arabic, etc). First translate everything to English, then extract requirements in English only.\nIMPORTANT — Use EXACTLY these values in your JSON output (do not extract from transcript):\n- \"project\": \"${d.project_name}\"\n- \"client\": \"${d.client_name}\"\n- \"version\": \"${d.version || '1.0'}\"\nReturn ONLY valid JSON with this exact structure — no markdown, no explanation:\n{\n  \"project\": \"${d.project_name}\",\n  \"client\": \"${d.client_name}\",\n  \"version\": \"${d.version || '1.0'}\",\n  \"meeting_summary\": \"2-3 line executive summary\",\n  \"functional_requirements\": [\n    {\n      \"id\": \"FR-001\",\n      \"title\": \"Requirement Title\",\n      \"description\": \"Detailed description\",\n      \"priority\": \"High/Medium/Low\",\n      \"complexity\": \"Low/Medium/High\",\n      \"module\": \"Module name\",\n      \"user_story\": \"As a user, I want to...\",\n      \"acceptance_criteria\": [\"Criteria 1\", \"Criteria 2\"],\n      \"status\": \"new\"\n    }\n  ],\n  \"non_functional_requirements\": [\n    {\n      \"id\": \"NFR-001\",\n      \"title\": \"Title\",\n      \"description\": \"Description\",\n      \"target\": \"Measurable target\",\n      \"priority\": \"High/Medium/Low\",\n      \"status\": \"new\"\n    }\n  ],\n  \"technical_constraints\": [{\"id\": \"TC-001\", \"constraint\": \"Title\", \"detail\": \"Detail\"}],\n  \"ui_ux_requirements\": [{\"screen\": \"Screen name\", \"components\": [\"Component 1\"], \"notes\": \"Notes\"}],\n  \"tech_stack\": [{\"layer\": \"Frontend/Backend/Database\", \"technology\": \"Tech name\", \"reason\": \"Why\"}],\n  \"timeline\": \"estimated timeline\",\n  \"budget\": \"estimated budget\",\n  \"conflicts\": [],\n  \"changes_summary\": {\n    \"new_count\": 0,\n    \"updated_count\": 0,\n    \"removed_count\": 0,\n    \"unchanged_count\": 0,\n    \"summary_text\": \"Brief human-readable description of what changed (2-3 lines)\"\n  }\n}`;\n\nconst userPrompt = `${d.isNewProject\n  ? 'NEW PROJECT (v1.0) — Extract all requirements from this transcript. Set status: \"new\" for all requirements.'\n  : `RETURNING CLIENT (previous v${d.previousVersion} → new v${d.version})\nPrevious requirements:\n${JSON.stringify(d.previous_requirements)}\n\nCompare with new transcript:\n- Mark unchanged requirements as status: \"unchanged\"\n- Mark modified requirements as status: \"updated\"  \n- Mark brand new requirements as status: \"new\"\n- Fill changes_summary with accurate counts and summary_text explaining what changed`}\n\nTranscript:\n${d.transcript}`;\n\nreturn [{\n  json: {\n    ...d,\n    groqBody: JSON.stringify({\n      model: \"llama-3.3-70b-versatile\",\n      max_completion_tokens: 4000,\n      messages: [\n        { role: \"system\", content: systemPrompt },\n        { role: \"user\", content: userPrompt }\n      ]\n    })\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2368,
+        176
+      ],
+      "id": "a9c8244a-9c8b-4559-b397-d4cd6e243b8a",
+      "name": "Prompt"
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineByPosition",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        3808,
+        176
+      ],
+      "id": "d4c9af5a-3370-40f5-bf6b-15a60dd268fb",
+      "name": "Merge"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleDriveOAuth2Api",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "uploadType",
+              "value": "multipart"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "=multipart/related; boundary={{ $json.boundary }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "=multipart/related; boundary={{ $json.boundary }}",
+        "body": "={{ $json.multipartBody }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        3552,
+        -16
+      ],
+      "id": "67c501b0-602a-41e2-a066-2ec867afeb86",
+      "name": "HTTP Request0",
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "Google Drive account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleDriveOAuth2Api",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "uploadType",
+              "value": "multipart"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "=multipart/related; boundary={{ $json.boundary }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "=multipart/related; boundary={{ $json.boundary }}",
+        "body": "={{ $json.multipartBody }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        3552,
+        352
+      ],
+      "id": "fa64c8a4-9a97-4ff4-a094-4ee1caee30bf",
+      "name": "HTTP Request1",
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "Google Drive account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst webhook = $('Webhook — Receive Audio').item.json;\nreturn [{\n  json: {\n    query: JSON.stringify({\n      project_name: webhook.body?.project_name || webhook.project_name\n    })\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -48,
+        176
+      ],
+      "id": "970c0bba-097c-4cfd-8762-c39fb31ca79e",
+      "name": " Code node — Set MongoDB Query"
+    },
+    {
+      "parameters": {
+        "jsCode": "const d = $input.first().json;\nconst boundary = 'reqai_boundary_' + Date.now();\nconst projectName = $('Parse Requirements JSON').item.json.project || 'Project';\nconst meetingNum = $('Format Transcript').first().json.meeting_number || 1;\nconst version = `1.${meetingNum - 1}`;\n\nconst metadata = JSON.stringify({\n  name: `Meeting — ${projectName} (v${version})`,\n  parents: [\"YOUR_GOOGLE_DRIVE_FOLDER_ID\"],\n  mimeType: \"application/vnd.google-apps.document\"\n});\n\nconst body = `--${boundary}\\r\\nContent-Type: application/json\\r\\n\\r\\n${metadata}\\r\\n--${boundary}\\r\\nContent-Type: text/html\\r\\n\\r\\n${d.choices[0].message.content}\\r\\n--${boundary}--`;\n\nreturn [{ json: { ...d, multipartBody: body, boundary: boundary } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3296,
+        -16
+      ],
+      "id": "72a623e0-2274-4d9d-a2be-fe6ab7758202",
+      "name": "Build Multipart Body - MEETING"
+    },
+    {
+      "parameters": {
+        "jsCode": "const d = $input.first().json;\nconst boundary = 'reqai_boundary_' + Date.now();\nconst meetingNum = d.meetingNumber || d.meeting_number || 1;\nconst version = `1.${meetingNum - 1}`;\n\nconst metadata = JSON.stringify({\n  name: `SRS — ${d.project} (v${version})`,\n  mimeType: 'application/vnd.google-apps.document',\n  parents: [\"YOUR_GOOGLE_DRIVE_FOLDER_ID\"]  \n});\n\nconst body = `--${boundary}\\r\\nContent-Type: application/json\\r\\n\\r\\n${metadata}\\r\\n--${boundary}\\r\\nContent-Type: text/html\\r\\n\\r\\n${d.srsDocument}\\r\\n--${boundary}--`;\n\nreturn [{ json: { ...d, multipartBody: body, boundary: boundary } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3312,
+        352
+      ],
+      "id": "09a41f30-604a-4790-b73a-382f9ecc95da",
+      "name": "Build Multipart Body - SRS"
+    },
+    {
+      "parameters": {
+        "jsCode": "const webhook = $('Webhook — Receive Audio').item.json;\nconst body = webhook.body || webhook;\n\n\nconsole.log('BODY:', JSON.stringify(body));\n\nreturn [{\n  json: {\n    project_name: body.project_name,\n    client_name: body.client_name,\n    pm_name: body.pm_name,\n    pm_email: body.pm_email,\n    audio_url: $('Merge Audio + Project').first().json.upload_url ||        body.audio_url || '',    meeting_count: 1,\n    last_updated: new Date().toISOString()\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4640,
+        64
+      ],
+      "id": "21550681-3efa-414c-add2-675833bd4385",
+      "name": "Prepare Insert Data"
+    },
+    {
+      "parameters": {
+        "jsCode": "const d = $('Prepare MongoDB Data').item.json;\nconst existing = $('MongoDB — Find Existing Project').item.json;\nconst currentCount = existing.meeting_count || 1;\n\nreturn [{\n  json: {\n    project_name: d.project_name,\n    client_name: d.client_name,\n    pm_name: d.pm_name,\n    pm_email: d.pm_email,\n    audio_url: d.audio_url,\n    meeting_count: currentCount + 1,\n    version: d.version,\n    last_updated: d.last_updated\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4640,
+        272
+      ],
+      "id": "a9d61832-3321-442f-b8ef-656b1b83178a",
+      "name": "Prepare Update Data"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "reqai-start",
+        "responseMode": "responseNode",
+        "options": {
+          "binaryPropertyName": "audio_file"
+        }
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -256,
+        176
+      ],
+      "id": "7d355d57-0dd1-4ae0-bd0d-e078f060bcd8",
+      "name": "Webhook — Receive Audio",
+      "webhookId": "3abcba59-a612-4688-9f91-5e4f2bf009d8"
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineByPosition",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        1072,
+        384
+      ],
+      "id": "274f079d-93ef-4070-b81a-be1f2b0a3157",
+      "name": "Merge Audio + Project"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "MongoDB — Find Existing Project": {
+      "main": [
+        [
+          {
+            "node": "Project Exists?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Project Exists?": {
+      "main": [
+        [
+          {
+            "node": "Load Existing Project Data",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Set New Project Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set New Project Data": {
+      "main": [
+        [
+          {
+            "node": "Merge Paths",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load Existing Project Data": {
+      "main": [
+        [
+          {
+            "node": "Merge Paths",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Paths": {
+      "main": [
+        [
+          {
+            "node": "Merge Audio + Project",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "AssemblyAI — Submit Audio": {
+      "main": [
+        [
+          {
+            "node": "Wait 15 Seconds",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait 15 Seconds": {
+      "main": [
+        [
+          {
+            "node": "AssemblyAI — Check Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AssemblyAI — Check Status": {
+      "main": [
+        [
+          {
+            "node": "Transcription Done?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Transcription Done?": {
+      "main": [
+        [
+          {
+            "node": "Format Transcript",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Wait 15 Seconds",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Transcript": {
+      "main": [
+        [
+          {
+            "node": "Prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Requirements JSON": {
+      "main": [
+        [
+          {
+            "node": "GROK — Generate Meeting Record",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Build SRS Document",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build SRS Document": {
+      "main": [
+        [
+          {
+            "node": "Build Multipart Body - SRS",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare MongoDB Data": {
+      "main": [
+        [
+          {
+            "node": "New or Existing?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "New or Existing?": {
+      "main": [
+        [
+          {
+            "node": "Prepare Insert Data",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Prepare Update Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MongoDB — Insert New Project": {
+      "main": [
+        [
+          {
+            "node": "Gmail — Send to PM",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MongoDB — Update Existing Project": {
+      "main": [
+        [
+          {
+            "node": "Gmail — Send to PM",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GROK — Extract & Compare Requirements": {
+      "main": [
+        [
+          {
+            "node": "Parse Requirements JSON",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GROK — Generate Meeting Record": {
+      "main": [
+        [
+          {
+            "node": "Build Multipart Body - MEETING",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AssemblyAI — Upload File": {
+      "main": [
+        [
+          {
+            "node": "Merge Audio + Project",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prompt": {
+      "main": [
+        [
+          {
+            "node": "GROK — Extract & Compare Requirements",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge": {
+      "main": [
+        [
+          {
+            "node": "Prepare MongoDB Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request0": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request1": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    " Code node — Set MongoDB Query": {
+      "main": [
+        [
+          {
+            "node": "MongoDB — Find Existing Project",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Multipart Body - MEETING": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request0",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Multipart Body - SRS": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Insert Data": {
+      "main": [
+        [
+          {
+            "node": "MongoDB — Insert New Project",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Update Data": {
+      "main": [
+        [
+          {
+            "node": "MongoDB — Update Existing Project",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook — Receive Audio": {
+      "main": [
+        [
+          {
+            "node": " Code node — Set MongoDB Query",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Respond to Extension",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "AssemblyAI — Upload File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Audio + Project": {
+      "main": [
+        [
+          {
+            "node": "AssemblyAI — Submit Audio",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false,
+    "timeSavedMode": "fixed",
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "versionId": "YOUR_VERSION_ID",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "YOUR_INSTANCE_ID"
+  },
+  "id": "YOUR_WORKFLOW_ID",
+  "tags": [
+    {
+      "updatedAt": "2026-03-16T05:55:23.478Z",
+      "createdAt": "2026-03-16T05:55:23.478Z",
+      "id": "YOUR_TAG_ID",
+      "name": "AI Agent"
+    },
+    {
+      "updatedAt": "2026-03-16T05:55:23.466Z",
+      "createdAt": "2026-03-16T05:55:23.466Z",
+      "id": "YOUR_TAG_ID",
+      "name": "ReqAI"
+    }
+  ]
+}
