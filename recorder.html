@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ReqAI Agent</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body class="recorder-body">
+  <div class="shell">
+    <aside class="hero">
+      <img src="logo.png" alt="ReqAI logo" class="hero-logo" />
+      <h1 style="text-align:center">ReqAI Agent</h1>
+      <p style="text-align:center">AI-Powered Requirement Extraction System</p>
+
+      <div class="status-pill" id="statusPill">Idle</div>
+      <div class="live-row">
+        <span class="dot"></span>
+        <span>Ready to record</span>
+      </div>
+    </aside>
+
+    <main class="panel">
+      <div class="grid">
+        <label>
+          <span>Project name</span>
+          <input id="projectName" type="text" placeholder="ReqAI Project" />
+        </label>
+        <label>
+          <span>Client name</span>
+          <input id="clientName" type="text" placeholder="Client Name" />
+        </label>
+        <label>
+          <span>PM name</span>
+          <input id="pmName" type="text" placeholder="PM Full Name" />
+        </label>
+        <label>
+          <span>PM email</span>
+          <input id="pmEmail" type="email" placeholder="pm@company.com" />
+        </label>
+        <label>
+          <span>n8n webhook</span>
+          <input id="webhookUrl" type="url" value="http://localhost:5678/webhook-test/reqai-start" />
+        </label>
+      </div>
+
+      <div class="actions">
+        <button id="startBtn" class="primary-btn">Start Recording</button>
+        <button id="stopBtn" class="secondary-btn" disabled>Stop & Upload</button>
+      </div>
+
+      <div class="info-box">
+        <strong>How it works</strong>
+        <ol>
+          <li>Click <em>Start Recording</em>.</li>
+          <li>Select the meeting tab and enable <em>Share tab audio</em>.</li>
+          <li>When you stop, the audio is saved to Downloads/ReqAI/ and uploaded to n8n.</li>
+        </ol>
+      </div>
+
+      <div class="log" id="log"></div>
+    </main>
+  </div>
+
+  <script src="recorder.js"></script>
+</body>
+</html>
